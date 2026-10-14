@@ -5,22 +5,15 @@ Webカメラと手の動きで立体を組み合わせる、3D創作ワークシ
 
 ## 起動
 
-Node.js **22.15以上（24 LTS推奨）** と npm が必要です。
-このPCの標準Node.js 20.17では新しいViteを動かせないため、Node.jsを更新してください。
+Node.jsのバージョンは [mise](https://mise.jdx.dev/) で `mise.toml` に固定しています。
 
-このPCですぐ試す場合は、下記のスクリプトがCodex付属のNode.jsを自動的に選びます。
-依存関係がまだない場合はインストールしてから起動します。
-
-```powershell
-.\scripts\dev.ps1
-```
-
-通常のNode.js環境では次の手順を使用してください。
-
-```powershell
+```sh
+mise install
 npm ci
 npm run dev
 ```
+
+miseを使わない場合は、`mise.toml` と同じバージョンのNode.js（22.15以上が必須）を用意してください。
 
 表示された `http://127.0.0.1:5173` をブラウザで開きます。
 初回起動時にGoogle公式のHand Landmarkerモデル（約8 MB）を取得します。
@@ -48,7 +41,7 @@ WASMとモデルは `public/` に配置され、以後はローカルから読�
 
 ## 検証・ビルド
 
-```powershell
+```sh
 npm run check
 npm test
 npm run build
