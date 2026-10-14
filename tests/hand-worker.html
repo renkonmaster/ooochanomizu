@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hand worker integration check</title>
+  </head>
+  <body>
+    <h1>Hand worker integration check</h1>
+    <p id="result" role="status">Preparing model…</p>
+    <script type="module">
+      // Dev-only integration fixture: real WASM/model inference without webcam access.
+      const output = document.getElementById("result");
+      const worker = new Worker(
+        new URL("../src/hand.worker.ts", import.meta.url),
+        { type: "module" },
+      );
+      const timeout = setTimeout(() => {
+        output.textContent = "FAIL: worker timed out";
+        worker.terminate();
+      }, 45000);
+      worker.onerror = (event) => {
+        clearTimeout(timeout);
+        output.textContent = `FAIL: ${event.message}`;
+        worker.terminate();
+      };
+      worker.onmessage = async (event) => {
+        if (event.data.type === "error") {
+          clearTimeout(timeout);
+          output.textContent = `FAIL: ${event.data.message}`;
+          worker.terminate();
+        }
+        if (event.data.type === "ready") {
+          output.textContent = "Model loaded; running a blank image…";
+          const canvas = document.createElement("canvas");
+          canvas.width = 640;
+          canvas.height = 480;
+          const context = canvas.getContext("2d");
+          context.fillStyle = "#eeeeee";
+          context.fillRect(0, 0, 640, 480);
+          const bitmap = await createImageBitmap(canvas);
+          worker.postMessage(
+            { type: "frame", bitmap, timestamp: performance.now() },
+            [bitmap],
+          );
+        }
+        if (event.data.type === "result") {
+          clearTimeout(timeout);
+          output.textContent = event.data.landmarks
+            ? "FAIL: unexpected hand in a blank image"
+            : "PASS: local model loaded and blank-frame inference completed in worker";
+          worker.terminate();
+        }
+      };
+      worker.postMessage({
+        type: "init",
+        wasmPath: `${location.origin}/vision`,
+        modelPath: `${location.origin}/models/hand_landmarker.task`,
+      });
+    </script>
+  </body>
+</html>
