@@ -1,6 +1,8 @@
 import "./style.css";
 import { AtelierScene, type ViewMode } from "./scene";
 import { HandCamera } from "./hand";
+import { atelierMenu } from "./menu";
+import { HandMenu } from "./hand-menu";
 import { HandInteraction, type DetectedHand, type Gesture } from "./gesture";
 import {
   COLORS,
@@ -15,18 +17,6 @@ import {
   type SceneObject,
 } from "./model";
 
-const shapes: Record<Primitive, string> = {
-  cube: '<path d="m16 3 12 7v13l-12 7-12-7V10Z M4 10l12 7 12-7 M16 17v13"/>',
-  sphere:
-    '<circle cx="16" cy="16" r="12"/><ellipse cx="16" cy="16" rx="5" ry="12"/><path d="M4 16h24"/>',
-  cylinder:
-    '<ellipse cx="16" cy="7" rx="11" ry="4"/><path d="M5 7v18c0 5 22 5 22 0V7 M5 25c0-5 22-5 22 0"/>',
-  cone: '<path d="M5 25 16 3l11 22 M5 25c0-6 22-6 22 0s-22 6-22 0Z"/>',
-  torus:
-    '<ellipse cx="16" cy="16" rx="13" ry="10"/><ellipse cx="16" cy="14" rx="6" ry="4"/>',
-};
-const svg = (kind: Primitive) =>
-  `<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true">${shapes[kind]}</svg>`;
 const app = document.querySelector<HTMLDivElement>("#app")!;
 app.innerHTML = `
   <header class="topbar">
@@ -35,32 +25,16 @@ app.innerHTML = `
     <div class="top-actions"><button id="export" class="quiet">作品を保存 ↓</button><button id="import" class="quiet">作品を開く</button><input id="file" type="file" accept="application/json,.json" hidden></div>
   </header>
   <main class="workspace">
-    <aside class="toolbox" aria-label="創作ツール">
-      <div class="section-heading"><span class="eyebrow">LET’S MAKE SOMETHING</span><h1>手のひらから、<br>かたちにしよう。</h1><p>つかんで、動かして、組み合わせて。<br>ここは、立体のお絵かきキャンバス。</p></div>
-      <section><div class="section-title"><h2>かたちを追加</h2><span>01</span></div><div class="primitive-grid">${Object.entries(
-        LABELS,
-      )
-        .map(
-          ([kind, label]) =>
-            `<button class="primitive" data-kind="${kind}">${svg(kind as Primitive)}<span>${label}</span><span class="plus">＋</span></button>`,
-        )
-        .join("")}</div></section>
-      <section><div class="section-title"><h2>色をえらぶ</h2><span>02</span></div><div class="palette" role="group" aria-label="色">${COLORS.map((color, i) => `<button class="swatch" data-color="${color}" style="--swatch:${color}" aria-label="${["ミント", "コーラル", "きいろ", "ブルー", "ラベンダー", "ホワイト"][i]}" aria-pressed="${i === 0}"></button>`).join("")}</div><p class="small-hint">選んだ立体、または次に追加する立体の色</p></section>
-      <section id="inspector"><div class="section-title"><h2>かたちをととのえる</h2><span>03</span></div><p id="selection-name" class="selection-name">立体を選んでみよう</p><fieldset id="transform" disabled>
-        <label class="range-label" for="scale">大きさ <output id="scale-value">1.00×</output></label><input id="scale" type="range" min="0.25" max="3" step="0.05" value="1">
-        <label class="range-label" for="depth">奥行き <output id="depth-value">0.0</output></label><input id="depth" type="range" min="-6" max="6" step="0.1" value="0"><div class="range-ends"><span>奥へ</span><span>手前へ</span></div>
-        <label class="range-label" for="rotate">回転 <output id="rotate-value">0°</output></label><input id="rotate" type="range" min="-180" max="180" step="5" value="0">
-        <div class="rotate-actions"><button id="tilt" class="quiet">↻ たてに回す</button><button id="duplicate" class="quiet">＋ 複製</button></div>
-        <button id="delete" class="delete-button">選んだ立体を削除</button>
-      </fieldset></section>
-      <div class="toolbox-footer"><span class="footer-dot"></span> 正解のない、ものづくり。</div>
-    </aside>
     <section class="studio" aria-label="創作エリア">
-      <div class="studio-toolbar"><div class="canvas-label"><span class="eyebrow">YOUR CANVAS</span><span id="object-count">3 つの立体</span></div><div class="view-actions"><button id="undo" class="icon-button" aria-label="元に戻す" title="元に戻す (Ctrl+Z)">↶</button><button id="redo" class="icon-button" aria-label="やり直す" title="やり直す (Ctrl+Shift+Z)">↷</button><span class="divider"></span><button id="reset-view" class="quiet">視点を戻す</button><button id="fullscreen" class="icon-button" aria-label="全画面にする" title="全画面">⛶</button></div></div>
-      <div id="viewport" class="viewport"><div class="canvas-note"><span class="note-line"></span>小さなかたちから、自由に。</div><div id="hand-cursor" class="hand-cursor" hidden><span></span><small id="object-cursor-label">右手 · 立体</small></div><div id="view-cursor" class="hand-cursor view-cursor" hidden><span></span><small id="view-cursor-label">左手 · 視点</small></div><div id="grab-pill" class="grab-pill" hidden>つかんでいます</div><div class="canvas-bottom"><span id="interaction-hint">立体をドラッグして動かそう</span><span class="view-hint">右ドラッグ：視点 · スクロール：ズーム</span></div></div>
-      <div class="camera-strip"><div class="camera-preview"><video id="webcam" playsinline muted aria-label="カメラプレビュー"></video><canvas id="landmarks" width="320" height="240" aria-hidden="true"></canvas><span id="camera-placeholder">✋</span><span class="camera-tag">CAMERA</span></div><div class="camera-copy"><div class="camera-title"><h2>手でつくってみよう</h2><span id="camera-status" class="status-tag">カメラ OFF</span></div><p id="camera-message">親指と人差し指でつまむと、立体をつかめます。</p><span class="privacy-note">映像はこの端末の中だけで処理されます。</span></div><button id="camera-toggle" class="primary">カメラをはじめる <span>↗</span></button></div>
-      <div class="hand-controls"><div class="hand-assignment"><span id="hand-roles" aria-live="polite">左手：視点 / 右手：立体</span><button id="swap-hands" class="quiet" aria-label="視点操作を右手にする" aria-pressed="false">左右を入れ替える ⇄</button></div><div class="view-modes" role="group" aria-label="手での視点操作"><span>視点操作</span><button class="quiet" data-view-mode="orbit" aria-pressed="true">回転</button><button class="quiet" data-view-mode="pan" aria-pressed="false">平行移動</button><button class="quiet" data-view-mode="zoom" aria-pressed="false">ズーム</button></div><p id="view-gesture-help">左手でつまんだまま動かすと視点が回転。指を開くと止まります。</p></div>
-      <div class="howto" aria-label="手の使い方"><div><span class="step">1</span><p><strong id="howto-view">左手で視点を動かす</strong><span>つまんで動かす・開くと止まる</span></p></div><span class="step-arrow">→</span><div><span class="step">2</span><p><strong id="howto-object">右手で立体をつかむ</strong><span>立体に合わせてつまむ</span></p></div><span class="step-arrow">→</span><div><span class="step">3</span><p><strong>指をひらして、離す</strong><span>好きなところに置いてみよう</span></p></div></div>
+      <div id="viewport" class="viewport">
+        ${atelierMenu}
+        <div id="hand-cursor" class="hand-cursor" hidden><span></span><small id="object-cursor-label">右手 · 立体・メニュー</small></div>
+        <div id="view-cursor" class="hand-cursor view-cursor" hidden><span></span><small id="view-cursor-label">左手 · 視点</small></div>
+        <div id="grab-pill" class="grab-pill" hidden>つかんでいます</div>
+        <div class="canvas-bottom"><span id="interaction-hint">立体をドラッグ · 下のメニューで追加・色・編集</span><span class="view-hint">右ドラッグ：視点 · スクロール：ズーム</span></div>
+      </div>
+      <div class="camera-strip"><div class="camera-preview"><video id="webcam" playsinline muted aria-label="カメラプレビュー"></video><canvas id="landmarks" width="320" height="240" aria-hidden="true"></canvas><span id="camera-placeholder">✋</span><span class="camera-tag">CAMERA</span></div><div class="camera-copy"><div class="camera-title"><h2>手でつくってみよう</h2><span id="camera-status" class="status-tag">カメラ OFF</span></div><p id="camera-message">親指と人差し指でつまむと、立体やメニューを操作できます。</p><span class="privacy-note">映像はこの端末の中だけで処理されます。</span></div><button id="camera-toggle" class="primary">カメラをはじめる <span>↗</span></button></div>
+      <div class="howto" aria-label="手の使い方"><div><span class="step">1</span><p><strong id="howto-view">左手で視点を動かす</strong><span>つまんで動かす・開くと止まる</span></p></div><span class="step-arrow">→</span><div><span class="step">2</span><p><strong id="howto-object">右手で立体・メニューを操作</strong><span>ボタンに合わせてつまむ</span></p></div><span class="step-arrow">→</span><div><span class="step">3</span><p><strong>指をひらして、離す</strong><span>次の操作の前に指を開こう</span></p></div></div>
     </section>
   </main><div id="toast" class="toast" role="status" aria-live="polite" hidden></div>`;
 
@@ -96,6 +70,9 @@ try {
 }
 let selected: string | null = null;
 let activeColor = COLORS[0];
+let activePrimitive: Primitive = "cube";
+type Menu = "add" | "color" | "edit" | "view";
+let openMenu: Menu | null = null;
 let dragSource: "mouse" | "hand" | null = null;
 let transaction: SceneObject[] | null = null;
 let cameraState: "off" | "starting" | "on" = "off";
@@ -123,6 +100,8 @@ try {
   throw new Error("WebGL initialization failed");
 }
 
+const handMenu = new HandMenu(viewport);
+
 function current(): SceneObject | undefined {
   return objects.find((o) => o.id === selected);
 }
@@ -144,6 +123,15 @@ function updateUI(): void {
   element("selection-name").textContent = object
     ? `${LABELS[object.kind]}を選択中`
     : "立体を選んでみよう";
+  element("color-target").textContent = object
+    ? `${LABELS[object.kind]}の色を変更します。次に追加する立体にも使います。`
+    : "次に追加する立体の色をえらぼう。";
+  element<HTMLButtonElement>("clear-selection").disabled = !object;
+  element<HTMLButtonElement>("add-object").disabled = objects.length >= MAX_OBJECTS;
+  element("add-object").textContent = `＋ ${LABELS[activePrimitive]}を追加`;
+  document.querySelectorAll<HTMLButtonElement>("[data-kind]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.kind === activePrimitive));
+  });
   if (object) {
     element<HTMLInputElement>("scale").value = String(object.scale);
     element("scale-value").textContent = `${object.scale.toFixed(2)}×`;
@@ -220,23 +208,48 @@ function move(x: number, y: number): void {
   view.sync(objects);
 }
 
-document.querySelectorAll<HTMLButtonElement>("[data-kind]").forEach((button) =>
+function setMenu(menu: Menu | null): void {
+  handMenu.reset();
+  openMenu = menu;
+  for (const name of ["add", "color", "edit", "view"] as const) {
+    element(`menu-${name}`).hidden = name !== menu;
+  }
+  document.querySelectorAll<HTMLButtonElement>("[data-menu]").forEach((button) => {
+    button.setAttribute("aria-expanded", String(button.dataset.menu === menu));
+  });
+}
+document.querySelectorAll<HTMLButtonElement>("[data-menu]").forEach((button) => {
   button.addEventListener("click", () => {
-    if (objects.length >= MAX_OBJECTS) {
-      toast("立体は100個までです。いくつか削除してみてください。");
-      return;
-    }
-    edit(() => {
-      const object = makeObject(
-        button.dataset.kind as Primitive,
-        activeColor,
-        objects.length,
-      );
-      objects.push(object);
-      selected = object.id;
-    });
-  }),
-);
+    release();
+    const menu = button.dataset.menu as Menu;
+    setMenu(openMenu === menu ? null : menu);
+  });
+});
+document.querySelectorAll<HTMLButtonElement>("[data-menu-close]").forEach((button) => {
+  button.addEventListener("click", () => setMenu(null));
+});
+document.querySelectorAll<HTMLButtonElement>("[data-kind]").forEach((button) => {
+  button.addEventListener("click", () => {
+    activePrimitive = button.dataset.kind as Primitive;
+    updateUI();
+  });
+});
+element("add-object").addEventListener("click", () => {
+  if (objects.length >= MAX_OBJECTS) {
+    toast("立体は100個までです。いくつか削除してみてください。");
+    return;
+  }
+  edit(() => {
+    const object = makeObject(activePrimitive, activeColor, objects.length);
+    objects.push(object);
+    selected = object.id;
+  });
+  setMenu(null);
+});
+element("clear-selection").addEventListener("click", () => {
+  release();
+  select(null);
+});
 document.querySelectorAll<HTMLButtonElement>("[data-color]").forEach((button) =>
   button.addEventListener("click", () => {
     activeColor = button.dataset.color!;
@@ -328,6 +341,7 @@ window.addEventListener("keydown", (event) => {
   }
   if (event.key === "Escape") {
     interruptHands();
+    setMenu(null);
     select(null);
   }
 });
@@ -363,8 +377,10 @@ view.canvas.addEventListener("pointerleave", () => {
   if (!dragSource) view.hover(null);
 });
 window.addEventListener("blur", interruptHands);
+viewport.addEventListener("pointerdown", () => handMenu.reset());
 
 function interruptHands(): void {
+  handMenu.reset();
   release();
   hands.reset();
   cursor.hidden = true;
@@ -377,12 +393,12 @@ const handName = (side: "Left" | "Right") => side === "Left" ? "左手" : "右�
 function updateHandControls(): void {
   const viewportHand = handName(hands.viewportHand);
   const objectHand = handName(hands.objectHand);
-  element("hand-roles").textContent = `${viewportHand}：視点 / ${objectHand}：立体`;
+  element("hand-roles").textContent = `${viewportHand}：視点 / ${objectHand}：立体・メニュー`;
   element("swap-hands").setAttribute("aria-pressed", String(hands.viewportHand === "Right"));
   element("view-cursor-label").textContent = `${viewportHand} · 視点`;
-  element("object-cursor-label").textContent = `${objectHand} · 立体`;
+  element("object-cursor-label").textContent = `${objectHand} · 立体・メニュー`;
   element("howto-view").textContent = `${viewportHand}で視点を動かす`;
-  element("howto-object").textContent = `${objectHand}で立体をつかむ`;
+  element("howto-object").textContent = `${objectHand}で立体・メニューを操作`;
   const description = viewMode === "zoom"
     ? "つまんだまま上に動かすと拡大、下に動かすと縮小"
     : `つまんだまま動かすと視点が${viewMode === "orbit" ? "回転" : "平行移動"}`;
@@ -390,7 +406,7 @@ function updateHandControls(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-view-mode]").forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.viewMode === viewMode));
   });
-  element("camera-message").textContent = `${viewportHand}で視点、${objectHand}で立体を操作。片手ずつでも使えます。`;
+  element("camera-message").textContent = `${viewportHand}で視点、${objectHand}で立体とメニューを操作。ボタンに合わせてつまもう。`;
 }
 element("swap-hands").addEventListener("click", () => {
   interruptHands();
@@ -399,7 +415,7 @@ element("swap-hands").addEventListener("click", () => {
     localStorage.setItem(handPreferenceKey, hands.viewportHand);
   } catch { /* The setting remains usable for this session. */ }
   updateHandControls();
-  toast(`${handName(hands.viewportHand)}で視点、${handName(hands.objectHand)}で立体を操作します。指を開いてからつまんでください。`);
+  toast(`${handName(hands.viewportHand)}で視点、${handName(hands.objectHand)}で立体・メニューを操作します。指を開いてからつまんでください。`);
 });
 document.querySelectorAll<HTMLButtonElement>("[data-view-mode]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -483,10 +499,19 @@ function processHand(detected: DetectedHand[]): void {
   // Camera movement has priority over hand object movement. Releasing first
   // keeps the object drag plane from jumping when the camera changes.
   if (navigating) {
+    handMenu.reset();
     if (dragSource === "hand") release();
     view.hover(null);
     if (frame.navigation) view.navigate(viewMode, frame.navigation.dx, frame.navigation.dy);
     return;
+  }
+  if (dragSource !== "mouse" && dragSource !== "hand") {
+    if (handMenu.update(gesture, frame.grab)) {
+      view.hover(null);
+      if (cameraState === "on")
+        element("interaction-hint").textContent = "ボタンをつまんで決定 · バーはつまんで左右に調整";
+      return;
+    }
   }
   if (!gesture) {
     if (dragSource === "hand") release();
@@ -497,10 +522,6 @@ function processHand(detected: DetectedHand[]): void {
     const hit = view.pick(gesture.x, gesture.y);
     if (!dragSource) {
       view.hover(hit);
-      if (hit && !gesture.pinching) {
-        finishTransaction();
-        select(hit);
-      }
     }
     if (frame.grab && hit)
       grab(hit, gesture.x, gesture.y, "hand");
@@ -518,8 +539,8 @@ function cameraOff(message?: string): void {
   element("camera-status").textContent = "カメラ OFF";
   element("camera-placeholder").hidden = false;
   element("camera-message").textContent =
-    message ?? `${handName(hands.viewportHand)}で視点、${handName(hands.objectHand)}で立体を操作。片手ずつでも使えます。`;
-  element("interaction-hint").textContent = "立体をドラッグして動かそう";
+    message ?? `${handName(hands.viewportHand)}で視点、${handName(hands.objectHand)}で立体・メニューを操作。`;
+  element("interaction-hint").textContent = "立体をドラッグ · 下のメニューで追加・色・編集";
 }
 const handCamera = new HandCamera(video, processHand, (message) => {
   cameraOff(message);
@@ -546,7 +567,8 @@ cameraButton.addEventListener("click", () => {
       element("camera-placeholder").hidden = true;
       element("camera-status").textContent = "手を探しています";
       element("camera-message").textContent =
-        `${handName(hands.viewportHand)}で視点、${handName(hands.objectHand)}で立体を操作。指を開いてからつまんでみよう。`;
+        `${handName(hands.viewportHand)}で視点、${handName(hands.objectHand)}で立体・メニューを操作。指を開いてからつまんでみよう。`;
+      viewport.scrollIntoView({ block: "nearest" });
     })
     .catch((error) => {
       const message =
