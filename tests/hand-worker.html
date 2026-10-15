@@ -45,9 +45,9 @@
         }
         if (event.data.type === "result") {
           clearTimeout(timeout);
-          output.textContent = event.data.landmarks
-            ? "FAIL: unexpected hand in a blank image"
-            : "PASS: local model loaded and blank-frame inference completed in worker";
+          output.textContent = Array.isArray(event.data.hands) && event.data.hands.length === 0
+            ? "PASS: local model loaded and blank-frame inference completed in worker"
+            : "FAIL: expected an empty hands array for a blank image";
           worker.terminate();
         }
       };

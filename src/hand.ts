@@ -1,4 +1,4 @@
-import type { Landmark } from "./gesture";
+import type { DetectedHand } from "./gesture";
 
 export class HandCamera {
   private stream: MediaStream | null = null;
@@ -12,7 +12,7 @@ export class HandCamera {
 
   constructor(
     private video: HTMLVideoElement,
-    private onLandmarks: (points: Landmark[] | undefined) => void,
+    private onHands: (hands: DetectedHand[]) => void,
     private onError: (message: string) => void,
   ) {}
 
@@ -93,7 +93,7 @@ export class HandCamera {
         if (session !== this.session) return;
         this.busy = false;
         if (event.data.type === "result")
-          this.onLandmarks(event.data.landmarks);
+          this.onHands(event.data.hands);
         else if (event.data.type === "error") {
           this.stop();
           this.onError("手の認識が停止しました。カメラを再起動してください。");
@@ -158,6 +158,6 @@ export class HandCamera {
     this.video.srcObject = null;
     this.busy = false;
     this.lastVideoTime = -1;
-    this.onLandmarks(undefined);
+    this.onHands([]);
   }
 }

@@ -11,6 +11,97 @@ export interface Gesture {
   pinching: boolean;
 }
 
+export type HandSide = "Left" | "Right";
+export interface DetectedHand {
+  side: HandSide;
+  landmarks: Landmark[];
+  score: number;
+}
+
+/** Tasks Vision labels the user's hands in unmirrored webcam frames.
+ * Only the preview and cursor coordinates are mirrored, not inference input.
+ */
+export function readHands(result: {
+  landmarks: Landmark[][];
+  handedness: { categoryName: string; score: number }[][];
+}): DetectedHand[] {
+  return result.landmarks.flatMap((landmarks, index) => {
+    const category = result.handedness[index]?.[0];
+    if (
+      !category ||
+      (category.categoryName !== "Left" && category.categoryName !== "Right") ||
+      !Number.isFinite(category.score) ||
+      category.score < 0.6
+    )
+      return [];
+    return [{ side: category.categoryName, landmarks, score: category.score }];
+  });
+}
+
+export interface HandFrame {
+  object: Gesture | null;
+  viewport: Gesture | null;
+  grab: boolean;
+  navigation: { dx: number; dy: number } | null;
+}
+
+/** Keep smoothing and pinch edges per role, independent of detection order. */
+export class HandInteraction {
+  private objectPinch = new PinchTracker();
+  private viewportPinch = new PinchTracker();
+  private previousViewport: Gesture | null = null;
+  private objectWasPinching = false;
+  private waitForOpen = { object: false, viewport: false };
+
+  constructor(public viewportHand: HandSide = "Left") {}
+
+  get objectHand(): HandSide {
+    return this.viewportHand === "Left" ? "Right" : "Left";
+  }
+
+  setViewportHand(side: HandSide): void {
+    this.viewportHand = side;
+    this.reset();
+  }
+
+  /** Interruptions require opening fingers before starting another operation. */
+  reset(): void {
+    this.objectPinch.reset();
+    this.viewportPinch.reset();
+    this.previousViewport = null;
+    this.objectWasPinching = false;
+    this.waitForOpen = { object: true, viewport: true };
+  }
+
+  update(hands: DetectedHand[], aspect = 1): HandFrame {
+    const find = (side: HandSide) =>
+      hands
+        .filter((hand) => hand.side === side)
+        .sort((a, b) => b.score - a.score)[0]?.landmarks;
+    const object = this.objectPinch.update(find(this.objectHand), aspect);
+    const viewport = this.viewportPinch.update(find(this.viewportHand), aspect);
+    if (object && !object.pinching) this.waitForOpen.object = false;
+    if (viewport && !viewport.pinching) this.waitForOpen.viewport = false;
+    const navigation =
+      viewport?.pinching &&
+      this.previousViewport?.pinching &&
+      !this.waitForOpen.viewport
+        ? {
+            dx: viewport.x - this.previousViewport.x,
+            dy: viewport.y - this.previousViewport.y,
+          }
+        : null;
+    const grab =
+      !!object?.pinching &&
+      !this.objectWasPinching &&
+      !this.waitForOpen.object &&
+      !viewport?.pinching;
+    this.previousViewport = viewport;
+    this.objectWasPinching = object?.pinching ?? false;
+    return { object, viewport, grab, navigation };
+  }
+}
+
 /** Palm-relative distances and separate thresholds avoid rapid grab/release flicker. */
 export class PinchTracker {
   private pinching = false;

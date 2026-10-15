@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { clamp, type SceneObject } from "./model";
 
 type Solid = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+export type ViewMode = "orbit" | "pan" | "zoom";
 
 export class AtelierScene {
   readonly canvas: HTMLCanvasElement;
@@ -88,9 +89,30 @@ export class AtelierScene {
   }
 
   resetView(): void {
+    // Flush damping so a previous mouse/hand movement cannot move the reset view.
+    const damping = this.controls.enableDamping;
+    this.controls.enableDamping = false;
+    this.controls.update();
     this.camera.position.set(7.5, 6.5, 12);
     this.controls.target.set(0, 1.3, 0);
     this.controls.update();
+    this.controls.enableDamping = damping;
+  }
+
+  navigate(mode: ViewMode, dx: number, dy: number): void {
+    if (this.dragging || !Number.isFinite(dx) || !Number.isFinite(dy)) return;
+    // Apply each inference delta exactly once; mouse navigation retains damping.
+    const damping = this.controls.enableDamping;
+    this.controls.enableDamping = false;
+    if (mode === "orbit") {
+      this.controls.rotateLeft(dx * Math.PI * 2);
+      this.controls.rotateUp(dy * Math.PI);
+    } else if (mode === "pan") {
+      this.controls.pan(dx * this.host.clientWidth, dy * this.host.clientHeight);
+    } else {
+      this.controls.dollyIn(Math.exp(dy * 3));
+    }
+    this.controls.enableDamping = damping;
   }
 
   private render = (): void => {

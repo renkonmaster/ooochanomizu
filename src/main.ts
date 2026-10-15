@@ -1,7 +1,7 @@
 import "./style.css";
-import { AtelierScene } from "./scene";
+import { AtelierScene, type ViewMode } from "./scene";
 import { HandCamera } from "./hand";
-import { PinchTracker, type Landmark } from "./gesture";
+import { HandInteraction, type DetectedHand, type Gesture } from "./gesture";
 import {
   COLORS,
   LABELS,
@@ -57,9 +57,10 @@ app.innerHTML = `
     </aside>
     <section class="studio" aria-label="創作エリア">
       <div class="studio-toolbar"><div class="canvas-label"><span class="eyebrow">YOUR CANVAS</span><span id="object-count">3 つの立体</span></div><div class="view-actions"><button id="undo" class="icon-button" aria-label="元に戻す" title="元に戻す (Ctrl+Z)">↶</button><button id="redo" class="icon-button" aria-label="やり直す" title="やり直す (Ctrl+Shift+Z)">↷</button><span class="divider"></span><button id="reset-view" class="quiet">視点を戻す</button><button id="fullscreen" class="icon-button" aria-label="全画面にする" title="全画面">⛶</button></div></div>
-      <div id="viewport" class="viewport"><div class="canvas-note"><span class="note-line"></span>小さなかたちから、自由に。</div><div id="hand-cursor" class="hand-cursor" hidden><span></span></div><div id="grab-pill" class="grab-pill" hidden>つかんでいます</div><div class="canvas-bottom"><span id="interaction-hint">立体をドラッグして動かそう</span><span class="view-hint">右ドラッグ：視点 · スクロール：ズーム</span></div></div>
+      <div id="viewport" class="viewport"><div class="canvas-note"><span class="note-line"></span>小さなかたちから、自由に。</div><div id="hand-cursor" class="hand-cursor" hidden><span></span><small id="object-cursor-label">右手 · 立体</small></div><div id="view-cursor" class="hand-cursor view-cursor" hidden><span></span><small id="view-cursor-label">左手 · 視点</small></div><div id="grab-pill" class="grab-pill" hidden>つかんでいます</div><div class="canvas-bottom"><span id="interaction-hint">立体をドラッグして動かそう</span><span class="view-hint">右ドラッグ：視点 · スクロール：ズーム</span></div></div>
       <div class="camera-strip"><div class="camera-preview"><video id="webcam" playsinline muted aria-label="カメラプレビュー"></video><canvas id="landmarks" width="320" height="240" aria-hidden="true"></canvas><span id="camera-placeholder">✋</span><span class="camera-tag">CAMERA</span></div><div class="camera-copy"><div class="camera-title"><h2>手でつくってみよう</h2><span id="camera-status" class="status-tag">カメラ OFF</span></div><p id="camera-message">親指と人差し指でつまむと、立体をつかめます。</p><span class="privacy-note">映像はこの端末の中だけで処理されます。</span></div><button id="camera-toggle" class="primary">カメラをはじめる <span>↗</span></button></div>
-      <div class="howto" aria-label="手の使い方"><div><span class="step">1</span><p><strong>立体を指す</strong><span>手を動かしてカーソルを合わせる</span></p></div><span class="step-arrow">→</span><div><span class="step">2</span><p><strong>つまんで、動かす</strong><span>親指と人差し指をくっつける</span></p></div><span class="step-arrow">→</span><div><span class="step">3</span><p><strong>指をひらして、離す</strong><span>好きなところに置いてみよう</span></p></div></div>
+      <div class="hand-controls"><div class="hand-assignment"><span id="hand-roles" aria-live="polite">左手：視点 / 右手：立体</span><button id="swap-hands" class="quiet" aria-label="視点操作を右手にする" aria-pressed="false">左右を入れ替える ⇄</button></div><div class="view-modes" role="group" aria-label="手での視点操作"><span>視点操作</span><button class="quiet" data-view-mode="orbit" aria-pressed="true">回転</button><button class="quiet" data-view-mode="pan" aria-pressed="false">平行移動</button><button class="quiet" data-view-mode="zoom" aria-pressed="false">ズーム</button></div><p id="view-gesture-help">左手でつまんだまま動かすと視点が回転。指を開くと止まります。</p></div>
+      <div class="howto" aria-label="手の使い方"><div><span class="step">1</span><p><strong id="howto-view">左手で視点を動かす</strong><span>つまんで動かす・開くと止まる</span></p></div><span class="step-arrow">→</span><div><span class="step">2</span><p><strong id="howto-object">右手で立体をつかむ</strong><span>立体に合わせてつまむ</span></p></div><span class="step-arrow">→</span><div><span class="step">3</span><p><strong>指をひらして、離す</strong><span>好きなところに置いてみよう</span></p></div></div>
     </section>
   </main><div id="toast" class="toast" role="status" aria-live="polite" hidden></div>`;
 
@@ -68,9 +69,16 @@ const element = <T extends HTMLElement>(id: string): T =>
 const viewport = element<HTMLDivElement>("viewport");
 const video = element<HTMLVideoElement>("webcam");
 const cursor = element<HTMLDivElement>("hand-cursor");
+const viewCursor = element<HTMLDivElement>("view-cursor");
 const cameraButton = element<HTMLButtonElement>("camera-toggle");
 const history = new History();
-const pinch = new PinchTracker();
+const hands = new HandInteraction();
+const handPreferenceKey = "tenohira-atelier.viewport-hand.v1";
+try {
+  if (localStorage.getItem(handPreferenceKey) === "Right")
+    hands.setViewportHand("Right");
+} catch { /* Hand controls work even if browser storage is unavailable. */ }
+let viewMode: ViewMode = "orbit";
 const storageKey = "tenohira-atelier.scene.v1";
 let objects: SceneObject[] = [
   makeObject("cube", COLORS[0], 2),
@@ -90,7 +98,6 @@ let selected: string | null = null;
 let activeColor = COLORS[0];
 let dragSource: "mouse" | "hand" | null = null;
 let transaction: SceneObject[] | null = null;
-let handWasPinching = false;
 let cameraState: "off" | "starting" | "on" = "off";
 let toastTimer = 0;
 let view: AtelierScene;
@@ -299,7 +306,7 @@ function restore(direction: "undo" | "redo"): void {
 element("undo").addEventListener("click", () => restore("undo"));
 element("redo").addEventListener("click", () => restore("redo"));
 element("reset-view").addEventListener("click", () => {
-  release();
+  interruptHands();
   view.resetView();
 });
 element("fullscreen").addEventListener("click", () => {
@@ -320,7 +327,7 @@ window.addEventListener("keydown", (event) => {
     element("delete").click();
   }
   if (event.key === "Escape") {
-    release();
+    interruptHands();
     select(null);
   }
 });
@@ -334,6 +341,7 @@ function pointerPosition(event: PointerEvent): { x: number; y: number } {
 }
 view.canvas.addEventListener("pointerdown", (event) => {
   if (event.button !== 0 || dragSource) return;
+  hands.reset();
   finishTransaction();
   const { x, y } = pointerPosition(event);
   const id = view.pick(x, y);
@@ -354,14 +362,59 @@ for (const name of ["pointerup", "pointercancel", "lostpointercapture"])
 view.canvas.addEventListener("pointerleave", () => {
   if (!dragSource) view.hover(null);
 });
-window.addEventListener("blur", release);
+window.addEventListener("blur", interruptHands);
 
-function drawLandmarks(points: Landmark[] | undefined): void {
+function interruptHands(): void {
+  release();
+  hands.reset();
+  cursor.hidden = true;
+  viewCursor.hidden = true;
+  viewCursor.classList.remove("grabbing");
+  view.hover(null);
+}
+
+const handName = (side: "Left" | "Right") => side === "Left" ? "左手" : "右手";
+function updateHandControls(): void {
+  const viewportHand = handName(hands.viewportHand);
+  const objectHand = handName(hands.objectHand);
+  element("hand-roles").textContent = `${viewportHand}：視点 / ${objectHand}：立体`;
+  element("swap-hands").setAttribute("aria-pressed", String(hands.viewportHand === "Right"));
+  element("view-cursor-label").textContent = `${viewportHand} · 視点`;
+  element("object-cursor-label").textContent = `${objectHand} · 立体`;
+  element("howto-view").textContent = `${viewportHand}で視点を動かす`;
+  element("howto-object").textContent = `${objectHand}で立体をつかむ`;
+  const description = viewMode === "zoom"
+    ? "つまんだまま上に動かすと拡大、下に動かすと縮小"
+    : `つまんだまま動かすと視点が${viewMode === "orbit" ? "回転" : "平行移動"}`;
+  element("view-gesture-help").textContent = `${viewportHand}で${description}。指を開くと止まります。`;
+  document.querySelectorAll<HTMLButtonElement>("[data-view-mode]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.viewMode === viewMode));
+  });
+  element("camera-message").textContent = `${viewportHand}で視点、${objectHand}で立体を操作。片手ずつでも使えます。`;
+}
+element("swap-hands").addEventListener("click", () => {
+  interruptHands();
+  hands.setViewportHand(hands.objectHand);
+  try {
+    localStorage.setItem(handPreferenceKey, hands.viewportHand);
+  } catch { /* The setting remains usable for this session. */ }
+  updateHandControls();
+  toast(`${handName(hands.viewportHand)}で視点、${handName(hands.objectHand)}で立体を操作します。指を開いてからつまんでください。`);
+});
+document.querySelectorAll<HTMLButtonElement>("[data-view-mode]").forEach((button) => {
+  button.addEventListener("click", () => {
+    interruptHands();
+    viewMode = button.dataset.viewMode as ViewMode;
+    updateHandControls();
+  });
+});
+updateHandControls();
+
+function drawLandmarks(detected: DetectedHand[]): void {
   const canvas = element<HTMLCanvasElement>("landmarks");
   const context = canvas.getContext("2d");
   if (!context) return;
   context.clearRect(0, 0, canvas.width, canvas.height);
-  if (!points) return;
   const connections = [
     [0, 1, 2, 3, 4],
     [0, 5, 6, 7, 8],
@@ -370,50 +423,76 @@ function drawLandmarks(points: Landmark[] | undefined): void {
     [13, 17, 18, 19, 20],
     [0, 17],
   ];
-  context.strokeStyle = "#aaf3d2";
   context.lineWidth = 2;
-  for (const chain of connections) {
-    context.beginPath();
-    chain.forEach((i, n) => {
-      const x = points[i].x * 320;
-      const y = points[i].y * 240;
-      if (n === 0) context.moveTo(x, y);
-      else context.lineTo(x, y);
-    });
-    context.stroke();
-  }
-  for (const point of points) {
-    context.beginPath();
-    context.arc(point.x * 320, point.y * 240, 2.5, 0, Math.PI * 2);
-    context.fillStyle = "#fff";
-    context.fill();
+  for (const hand of detected) {
+    const points = hand.landmarks;
+    if (points.length !== 21) continue;
+    context.strokeStyle = hand.side === hands.viewportHand ? "#f3c580" : "#aaf3d2";
+    for (const chain of connections) {
+      context.beginPath();
+      chain.forEach((i, n) => {
+        const x = points[i].x * canvas.width;
+        const y = points[i].y * canvas.height;
+        if (n === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      });
+      context.stroke();
+    }
+    for (const point of points) {
+      context.beginPath();
+      context.arc(point.x * canvas.width, point.y * canvas.height, 2.5, 0, Math.PI * 2);
+      context.fillStyle = "#fff";
+      context.fill();
+    }
+    context.save();
+    context.translate(points[0].x * canvas.width, points[0].y * canvas.height);
+    context.scale(-1, 1); // Preview canvas is mirrored; keep its labels readable.
+    context.fillStyle = context.strokeStyle;
+    context.font = "14px sans-serif";
+    context.fillText(`${handName(hand.side)} · ${hand.side === hands.viewportHand ? "視点" : "立体"}`, 5, -8);
+    context.restore();
   }
 }
-function processHand(points: Landmark[] | undefined): void {
-  drawLandmarks(points);
-  const gesture = pinch.update(
-    points,
-    video.videoWidth / (video.videoHeight || 1),
+function showHandCursor(node: HTMLElement, gesture: Gesture | null): void {
+  node.hidden = !gesture;
+  if (gesture) {
+    node.style.left = `${gesture.x * 100}%`;
+    node.style.top = `${gesture.y * 100}%`;
+  }
+}
+function processHand(detected: DetectedHand[]): void {
+  drawLandmarks(detected);
+  const frame = hands.update(
+    detected,
+    video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 1,
   );
-  if (!gesture) {
-    cursor.hidden = true;
-    handWasPinching = false;
+  const gesture = frame.object;
+  showHandCursor(cursor, gesture);
+  showHandCursor(viewCursor, frame.viewport);
+  const navigating = !!frame.viewport?.pinching && dragSource !== "mouse";
+  viewCursor.classList.toggle("grabbing", navigating);
+  if (cameraState === "on") {
+    element("camera-status").textContent = [
+      frame.viewport ? `${handName(hands.viewportHand)}：視点` : "",
+      gesture ? `${handName(hands.objectHand)}：立体` : "",
+    ].filter(Boolean).join(" / ") || "手を探しています";
+    element("interaction-hint").textContent = navigating
+      ? `${handName(hands.viewportHand)}で視点操作中 · 指を開くと止まります`
+      : `${handName(hands.viewportHand)}：視点 / ${handName(hands.objectHand)}：立体 · つまんで動かそう`;
+  }
+  // Camera movement has priority over hand object movement. Releasing first
+  // keeps the object drag plane from jumping when the camera changes.
+  if (navigating) {
     if (dragSource === "hand") release();
     view.hover(null);
-    if (cameraState === "on") {
-      element("camera-status").textContent = "手を探しています";
-      element("interaction-hint").textContent = "カメラに片手を映してみよう";
-    }
+    if (frame.navigation) view.navigate(viewMode, frame.navigation.dx, frame.navigation.dy);
     return;
   }
-  cursor.hidden = false;
-  cursor.style.left = `${gesture.x * 100}%`;
-  cursor.style.top = `${gesture.y * 100}%`;
-  element("camera-status").textContent = gesture.pinching
-    ? "つまんでいます"
-    : "手を認識中";
-  element("interaction-hint").textContent =
-    "立体に合わせて、親指と人差し指でつまもう";
+  if (!gesture) {
+    if (dragSource === "hand") release();
+    view.hover(null);
+    return;
+  }
   if (dragSource !== "mouse") {
     const hit = view.pick(gesture.x, gesture.y);
     if (!dragSource) {
@@ -423,23 +502,23 @@ function processHand(points: Landmark[] | undefined): void {
         select(hit);
       }
     }
-    if (gesture.pinching && !handWasPinching && hit)
+    if (frame.grab && hit)
       grab(hit, gesture.x, gesture.y, "hand");
     if (dragSource === "hand") {
       if (gesture.pinching) move(gesture.x, gesture.y);
       else release();
     }
   }
-  handWasPinching = gesture.pinching;
 }
 function cameraOff(message?: string): void {
+  interruptHands();
   cameraState = "off";
   cameraButton.disabled = false;
   cameraButton.textContent = "カメラをはじめる ↗";
   element("camera-status").textContent = "カメラ OFF";
   element("camera-placeholder").hidden = false;
   element("camera-message").textContent =
-    message ?? "親指と人差し指でつまむと、立体をつかめます。";
+    message ?? `${handName(hands.viewportHand)}で視点、${handName(hands.objectHand)}で立体を操作。片手ずつでも使えます。`;
   element("interaction-hint").textContent = "立体をドラッグして動かそう";
 }
 const handCamera = new HandCamera(video, processHand, (message) => {
@@ -467,7 +546,7 @@ cameraButton.addEventListener("click", () => {
       element("camera-placeholder").hidden = true;
       element("camera-status").textContent = "手を探しています";
       element("camera-message").textContent =
-        "片手を映して、立体にカーソルを合わせてみよう。";
+        `${handName(hands.viewportHand)}で視点、${handName(hands.objectHand)}で立体を操作。指を開いてからつまんでみよう。`;
     })
     .catch((error) => {
       const message =

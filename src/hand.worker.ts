@@ -1,4 +1,5 @@
 import { FilesetResolver, HandLandmarker } from "@mediapipe/tasks-vision";
+import { readHands } from "./gesture";
 
 let detector: HandLandmarker | null = null;
 self.onmessage = async (event: MessageEvent) => {
@@ -11,7 +12,7 @@ self.onmessage = async (event: MessageEvent) => {
       detector = await HandLandmarker.createFromOptions(vision, {
         baseOptions: { modelAssetPath: data.modelPath, delegate: "CPU" },
         runningMode: "VIDEO",
-        numHands: 1,
+        numHands: 2,
         minHandDetectionConfidence: 0.6,
         minHandPresenceConfidence: 0.6,
         minTrackingConfidence: 0.6,
@@ -20,7 +21,7 @@ self.onmessage = async (event: MessageEvent) => {
     } else if (data.type === "frame" && detector) {
       try {
         const result = detector.detectForVideo(data.bitmap, data.timestamp);
-        self.postMessage({ type: "result", landmarks: result.landmarks[0] });
+        self.postMessage({ type: "result", hands: readHands(result) });
       } finally {
         data.bitmap.close();
       }
