@@ -20,11 +20,9 @@ WORKDIR /app
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-COPY --from=build /app/server ./server
-# The WebSocket server imports the shared scene validator directly.
-COPY --from=build /app/src/model.ts ./src/model.ts
+COPY --from=build /app/dist-server ./dist-server
 
 USER node
 EXPOSE 3000
 
-CMD ["node", "--experimental-strip-types", "server/index.mjs"]
+CMD ["node", "dist-server/index.mjs"]

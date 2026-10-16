@@ -5,6 +5,7 @@
 .aws
 node_modules
 dist
+dist-server
 coverage
 test-results
 playwright-report

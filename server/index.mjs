@@ -1,5 +1,7 @@
 import { createServer } from "node:http";
-import { stat, readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { pipeline } from "node:stream/promises";
 import { resolve, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { attachSceneSync } from "./sync.mjs";
@@ -11,19 +13,33 @@ const mime = {
   ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon",
 };
 
-export function createAppServer() {
+export function createAppServer(directory = dist) {
+  const root = resolve(directory);
   const server = createServer(async (request, response) => {
     if (!["GET", "HEAD"].includes(request.method)) { response.writeHead(405).end(); return; }
     try {
       const pathname = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
-      let path = resolve(dist, `.${pathname}`);
-      if (!path.startsWith(resolve(dist) + sep) && path !== resolve(dist)) { response.writeHead(403).end(); return; }
-      if (!extname(path)) path = resolve(dist, "index.html");
+      let path = resolve(root, `.${pathname}`);
+      if (!path.startsWith(root + sep) && path !== root) { response.writeHead(403).end(); return; }
+      if (!extname(path)) path = resolve(root, "index.html");
       const info = await stat(path);
       if (!info.isFile()) { response.writeHead(404).end(); return; }
-      response.writeHead(200, { "Content-Type": mime[extname(path)] ?? "application/octet-stream", "Content-Length": info.size });
-      response.end(request.method === "HEAD" ? undefined : await readFile(path));
-    } catch { response.writeHead(404).end("Not found"); }
+      const etag = `W/"${info.size.toString(16)}-${Math.trunc(info.mtimeMs).toString(16)}"`;
+      const headers = {
+        "Cache-Control": pathname.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-cache",
+        "ETag": etag,
+        "Last-Modified": info.mtime.toUTCString(),
+      };
+      const unchanged = request.headers["if-none-match"]?.split(",").some((tag) => tag.trim() === etag || tag.trim() === "*");
+      if (unchanged) { response.writeHead(304, headers).end(); return; }
+      response.writeHead(200, { ...headers, "Content-Type": mime[extname(path)] ?? "application/octet-stream", "Content-Length": info.size });
+      if (request.method === "HEAD") { response.end(); return; }
+      // Backpressure keeps concurrent model downloads bounded by small chunks.
+      await pipeline(createReadStream(path, { highWaterMark: 64 * 1024 }), response);
+    } catch {
+      if (response.headersSent || response.destroyed) response.destroy();
+      else response.writeHead(404).end("Not found");
+    }
   });
   attachSceneSync(server);
   return server;

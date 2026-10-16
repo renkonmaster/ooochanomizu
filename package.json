@@ -9,11 +9,12 @@
   "scripts": {
     "assets": "node scripts/prepare-assets.mjs",
     "dev": "npm run assets && vite --host 127.0.0.1",
-    "build": "npm run check && npm run assets && vite build",
+    "build": "npm run check && npm run assets && vite build && vite build --config vite.server.config.mjs",
     "preview": "vite preview --host 127.0.0.1",
-    "start": "node --experimental-strip-types server/index.mjs",
+    "start": "node dist-server/index.mjs",
     "check": "tsc --noEmit",
     "test": "vitest run",
+    "test:http": "node --experimental-strip-types --test tests/http.integration.mjs",
     "test:sync": "node --experimental-strip-types --test tests/scene-sync.integration.mjs"
   },
   "dependencies": {

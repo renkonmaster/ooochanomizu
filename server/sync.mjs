@@ -7,15 +7,18 @@ export function attachSceneSync(server) {
   const rooms = new Map();
   const wss = new WebSocketServer({ noServer: true, maxPayload: 1_000_000 });
   const state = (room, extra = {}) => JSON.stringify({ type: "state", revision: room.revision, objects: room.objects, ...extra });
-  function send(client, room, extra) {
+  function sendMessage(client, message) {
     if (client.readyState !== WebSocket.OPEN) return;
     if (client.bufferedAmount > 1_000_000) return client.terminate();
-    client.send(state(room, extra));
+    client.send(message);
   }
+  const send = (client, room, extra) => sendMessage(client, state(room, extra));
   function broadcast(roomId, sender, seq) {
     const room = rooms.get(roomId);
+    const message = state(room);
+    const acknowledged = seq === undefined ? message : state(room, { ack: seq });
     for (const client of wss.clients) {
-      if (client.room === roomId) send(client, room, client === sender && seq !== undefined ? { ack: seq } : {});
+      if (client.room === roomId) sendMessage(client, client === sender ? acknowledged : message);
     }
   }
   function upgrade(request, socket, head) {

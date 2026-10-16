@@ -73,12 +73,14 @@ EditorでWebカメラを使う場合はHTTPSが必要です（localhostは例外
 ```sh
 npm run check
 npm test
+npm run test:http
 npm run test:sync
 npm run build
 npm start
 ```
 
 `npm start` は `http://127.0.0.1:3000` で `dist/` とWebSocketを配信します。
+先に `npm run build` を実行してください。本番サーバーは `dist-server/index.mjs` にビルドされ、起動時のTypeScript変換を省きます。
 モデルとWASMも含まれます。`HOST=0.0.0.0 PORT=3000 npm start` で他端末から接続できます。
 `npm run dev` と `npm run preview` にもWebSocketサーバーが組み込まれています。
 静的ファイルだけのホスティングでは同期できません。HTTPSのリバースプロキシ経由で配信する場合は `/sync` のWebSocket Upgradeも転送してください。
@@ -88,6 +90,7 @@ npm start
 
 `npm test` では保存データの検証のほか、左右の割り当て、認識順序の変化、独立したピンチ判定、
 視点操作の開始・停止、左右切り替え後の誤操作防止を検証します。
+`npm run test:http` は同時ファイル配信、ETagによる再取得の省略、ファイル更新時のキャッシュ無効化、ダウンロード中断を検証します。
 `npm run test:sync` は実際のWebSocketで、Editor→Viewerの変更配信、後からの参加、再接続、Room分離、Viewerの書き込み拒否を検証します。
 開発サーバーの `/tests/hand-worker.html` でモデルの動作をカメラなしで再検証できます。
 実際のWebカメラでの左右の認識・操作感、展示PC上の両手推論の性能は引き続き確認が必要です。
@@ -105,12 +108,20 @@ Editorは `http://localhost:3000/`、Viewerは `http://localhost:3000/?mode=view
 Dockerfileは `mise.toml` と同じNode.js 24.19.0を使用します。
 依存関係の取得とモデルのダウンロードはビルド時に行うため、その際はインターネット接続が必要です。
 起動時にはモデルの取得やフロントエンドのビルドを行いません。
-実行イメージには本番依存関係・`dist/`・サーバー・共有のシーン検証コードを含め、`node` ユーザーで実行します。
+実行イメージには本番依存関係・`dist/`・`dist-server/` を含め、`node` ユーザーで実行します。
+モデルとWASMは64KiBのチャンクで配信し、同時接続数に比例してファイル全体をメモリに保持することを避けます。
+ETagを使って変更のないファイルの再送を省き、WebSocketのシーン配信データは同じ内容を接続数分作り直さず共有します。
 
 NeoShowcaseではRuntimeアプリとしてルートの `Dockerfile` を指定し、公開先ポートを `3000` に設定してください。
 コンテナは標準で `HOST=0.0.0.0`、`PORT=3000` で起動し、HTTPとWebSocketを同じポートで受け付けます。
 公開後はHTTPSでEditorのカメラ入力とViewerへの同期を確認してください。
 作品は現状メモリ上にあり、コンテナ内の永続保存は行いません。
+
+メモリの比較ではDockerを200,000,000バイトに制限し、20接続でモデル・WASMを同時取得しました。
+変更前は上限付近に達して取得がタイムアウトしましたが、ストリーミング配信とサーバーの事前ビルド後は正常に完了しました。
+100ms間隔で測定したNode.jsプロセスのピークRSSは約187MBから約99MBに減少しました。
+続いて100個の立体を20接続で共有し、4接続からそれぞれ毎秒20回の編集を10秒間送信した際のピークRSSは約86MBでした。
+これはローカルDockerでの測定値であり、NeoShowcaseのメトリクスと直接同じ値になることを保証するものではありません。
 
 ## 構成
 
@@ -120,7 +131,8 @@ NeoShowcaseではRuntimeアプリとしてルートの `Dockerfile` を指定し
 - `src/scene.ts`: Three.js表示、選択、ドラッグ、視点操作、Viewerの固定距離での自動周回
 - `src/sync.ts`: WebSocket接続、変更送信、受信反映、自動再接続
 - `server/sync.mjs`: Roomごとのシーン管理、検証、WebSocket配信
-- `server/index.mjs`: 本番用HTTP / WebSocketサーバー
+- `server/index.mjs`: HTTPのストリーミング配信、キャッシュ、WebSocketサーバーの起動
+- `vite.server.config.mjs`: 本番サーバーとシーン検証コードのJavaScriptへのビルド
 - `src/gesture.ts`: 左右の認識結果の取り込み、手の役割切り替え、ピンチ判定、平滑化、視点操作の移動量
 - `src/hand.ts` / `src/hand.worker.ts`: カメラ、モデル準備、端末内推論、リソース解放
 - `src/model.ts`: シーンデータ、保存データの検証
@@ -140,7 +152,7 @@ Roomの作成・参加画面や展示用の運用設定は今後追加します�
 ## Git
 
 `main` ブランチで管理しています。依存関係は `package-lock.json` に固定しています。
-`node_modules/`、`dist/`、取得したモデル／WASM、環境変数ファイルはGit管理対象外です。
+`node_modules/`、`dist/`、`dist-server/`、取得したモデル／WASM、環境変数ファイルはGit管理対象外です。
 リモートリポジトリは未設定です。
 
 ## 参照
