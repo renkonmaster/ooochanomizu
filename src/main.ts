@@ -8,8 +8,6 @@ import {
   COLORS,
   LABELS,
   MAX_OBJECTS,
-  History,
-  cloneScene,
   makeObject,
   parseScene,
   serializeScene,
@@ -20,9 +18,8 @@ import {
 const app = document.querySelector<HTMLDivElement>("#app")!;
 app.innerHTML = `
   <header class="topbar">
-    <a class="brand" href="/" aria-label="てのひらアトリエ"><span class="brand-mark">✳</span><span>てのひら<span class="brand-light">アトリエ</span><small>HANDTRACKING · 3D WORKSHOP</small></span></a>
-    <span class="local-badge"><i></i> ひとりで創作</span>
-    <div class="top-actions"><button id="export" class="quiet">作品を保存 ↓</button><button id="import" class="quiet">作品を開く</button><input id="file" type="file" accept="application/json,.json" hidden></div>
+    <h1 class="brand">てのひらアトリエ</h1>
+    <div class="top-actions"><button id="export" class="quiet">ファイルに保存</button><button id="import" class="quiet">ファイルを開く</button><input id="file" type="file" accept="application/json,.json" hidden></div>
   </header>
   <main class="workspace">
     <section class="studio" aria-label="創作エリア">
@@ -30,11 +27,11 @@ app.innerHTML = `
         ${atelierMenu}
         <div id="hand-cursor" class="hand-cursor" hidden><span></span><small id="object-cursor-label">右手 · 立体・メニュー</small></div>
         <div id="view-cursor" class="hand-cursor view-cursor" hidden><span></span><small id="view-cursor-label">左手 · 視点</small></div>
-        <div id="grab-pill" class="grab-pill" hidden>つかんでいます</div>
-        <div class="canvas-bottom"><span id="interaction-hint">立体をドラッグ · 下のメニューで追加・色・編集</span><span class="view-hint">右ドラッグ：視点 · スクロール：ズーム</span></div>
+        <div id="grab-pill" class="grab-pill" hidden>移動中</div>
+        <div class="canvas-bottom"><span id="interaction-hint">ドラッグで移動</span><span class="view-hint">右ドラッグ：視点回転　スクロール：ズーム</span></div>
       </div>
-      <div class="camera-strip"><div class="camera-preview"><video id="webcam" playsinline muted aria-label="カメラプレビュー"></video><canvas id="landmarks" width="320" height="240" aria-hidden="true"></canvas><span id="camera-placeholder">✋</span><span class="camera-tag">CAMERA</span></div><div class="camera-copy"><div class="camera-title"><h2>手でつくってみよう</h2><span id="camera-status" class="status-tag">カメラ OFF</span></div><p id="camera-message">親指と人差し指でつまむと、立体やメニューを操作できます。</p><span class="privacy-note">映像はこの端末の中だけで処理されます。</span></div><button id="camera-toggle" class="primary">カメラをはじめる <span>↗</span></button></div>
-      <div class="howto" aria-label="手の使い方"><div><span class="step">1</span><p><strong id="howto-view">左手で視点を動かす</strong><span>つまんで動かす・開くと止まる</span></p></div><span class="step-arrow">→</span><div><span class="step">2</span><p><strong id="howto-object">右手で立体・メニューを操作</strong><span>ボタンに合わせてつまむ</span></p></div><span class="step-arrow">→</span><div><span class="step">3</span><p><strong>指をひらして、離す</strong><span>次の操作の前に指を開こう</span></p></div></div>
+      <div class="camera-strip"><div class="camera-preview"><video id="webcam" playsinline muted aria-label="カメラプレビュー"></video><canvas id="landmarks" width="320" height="240" aria-hidden="true"></canvas><span id="camera-placeholder">映像なし</span></div><div class="camera-copy"><div class="camera-title"><h2>手の入力</h2><span id="camera-status" class="status-tag">停止中</span></div><p id="camera-message">親指と人差し指をつまんで操作します。</p><span class="privacy-note">映像は端末内で処理されます。</span></div><button id="camera-toggle" class="primary">カメラを開始</button></div>
+      <div class="input-guide" aria-label="手の操作"><span id="howto-view">左手：視点</span><span id="howto-object">右手：立体・メニュー</span><span>つまむ：決定・移動 / 開く：終了</span></div>
     </section>
   </main><div id="toast" class="toast" role="status" aria-live="polite" hidden></div>`;
 
@@ -45,7 +42,6 @@ const video = element<HTMLVideoElement>("webcam");
 const cursor = element<HTMLDivElement>("hand-cursor");
 const viewCursor = element<HTMLDivElement>("view-cursor");
 const cameraButton = element<HTMLButtonElement>("camera-toggle");
-const history = new History();
 const hands = new HandInteraction();
 const handPreferenceKey = "tenohira-atelier.viewport-hand.v1";
 try {
@@ -74,7 +70,7 @@ let activePrimitive: Primitive = "cube";
 type Menu = "add" | "color" | "edit" | "view";
 let openMenu: Menu | null = null;
 let dragSource: "mouse" | "hand" | null = null;
-let transaction: SceneObject[] | null = null;
+let pendingSave = false;
 let cameraState: "off" | "starting" | "on" = "off";
 let toastTimer = 0;
 let view: AtelierScene;
@@ -116,19 +112,17 @@ function persist(): void {
 }
 function updateUI(): void {
   const object = current();
-  element("object-count").textContent = `${objects.length} つの立体`;
-  element<HTMLButtonElement>("undo").disabled = !history.canUndo;
-  element<HTMLButtonElement>("redo").disabled = !history.canRedo;
+  element("object-count").textContent = `立体 ${objects.length}`;
   element<HTMLFieldSetElement>("transform").disabled = !object;
   element("selection-name").textContent = object
     ? `${LABELS[object.kind]}を選択中`
-    : "立体を選んでみよう";
+    : "未選択";
   element("color-target").textContent = object
-    ? `${LABELS[object.kind]}の色を変更します。次に追加する立体にも使います。`
-    : "次に追加する立体の色をえらぼう。";
+    ? `${LABELS[object.kind]}の色。次の追加にも使用します。`
+    : "追加する立体の色";
   element<HTMLButtonElement>("clear-selection").disabled = !object;
   element<HTMLButtonElement>("add-object").disabled = objects.length >= MAX_OBJECTS;
-  element("add-object").textContent = `＋ ${LABELS[activePrimitive]}を追加`;
+  element("add-object").textContent = `${LABELS[activePrimitive]}を追加`;
   document.querySelectorAll<HTMLButtonElement>("[data-kind]").forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.kind === activePrimitive));
   });
@@ -161,13 +155,9 @@ function select(id: string | null): void {
   view.select(id);
   updateUI();
 }
-function beginTransaction(): void {
-  if (!transaction) transaction = cloneScene(objects);
-}
-function finishTransaction(): void {
-  if (transaction) {
-    history.commit(transaction, objects);
-    transaction = null;
+function finishEdit(): void {
+  if (pendingSave) {
+    pendingSave = false;
     persist();
     updateUI();
   }
@@ -177,14 +167,14 @@ function release(): void {
   view.endDrag();
   cursor.classList.remove("grabbing");
   element("grab-pill").hidden = true;
-  finishTransaction();
+  finishEdit();
 }
 function edit(action: () => void): void {
   release();
-  beginTransaction();
   action();
+  pendingSave = true;
   sync();
-  finishTransaction();
+  finishEdit();
 }
 function grab(
   id: string,
@@ -195,7 +185,6 @@ function grab(
   if (dragSource) return;
   select(id);
   if (!view.beginDrag(id, x, y)) return;
-  beginTransaction();
   dragSource = source;
   element("grab-pill").hidden = false;
   cursor.classList.add("grabbing");
@@ -205,6 +194,7 @@ function move(x: number, y: number): void {
   const position = view.drag(x, y);
   if (!object || !position) return;
   object.position = position;
+  pendingSave = true;
   view.sync(objects);
 }
 
@@ -236,7 +226,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-kind]").forEach((button) => 
 });
 element("add-object").addEventListener("click", () => {
   if (objects.length >= MAX_OBJECTS) {
-    toast("立体は100個までです。いくつか削除してみてください。");
+    toast("立体は100個まで追加できます。");
     return;
   }
   edit(() => {
@@ -266,7 +256,7 @@ for (const id of ["scale", "depth", "rotate"]) {
     if (dragSource) release();
     const object = current();
     if (!object) return;
-    beginTransaction();
+    pendingSave = true;
     const value = Number(input.value);
     if (id === "scale") object.scale = value;
     else if (id === "depth") object.position[2] = value;
@@ -274,8 +264,8 @@ for (const id of ["scale", "depth", "rotate"]) {
     view.sync(objects);
     updateUI();
   });
-  input.addEventListener("change", finishTransaction);
-  input.addEventListener("blur", finishTransaction);
+  input.addEventListener("change", finishEdit);
+  input.addEventListener("blur", finishEdit);
 }
 element("tilt").addEventListener("click", () =>
   edit(() => {
@@ -292,7 +282,7 @@ element("delete").addEventListener("click", () =>
 );
 element("duplicate").addEventListener("click", () => {
   if (objects.length >= MAX_OBJECTS) {
-    toast("立体は100個までです。");
+    toast("立体は100個まで追加できます。");
     return;
   }
   edit(() => {
@@ -306,18 +296,6 @@ element("duplicate").addEventListener("click", () => {
     selected = duplicate.id;
   });
 });
-function restore(direction: "undo" | "redo"): void {
-  release();
-  const snapshot = history[direction](objects);
-  if (snapshot) {
-    objects = snapshot;
-    selected = null;
-    sync();
-    persist();
-  }
-}
-element("undo").addEventListener("click", () => restore("undo"));
-element("redo").addEventListener("click", () => restore("redo"));
 element("reset-view").addEventListener("click", () => {
   interruptHands();
   view.resetView();
@@ -331,10 +309,6 @@ element("fullscreen").addEventListener("click", () => {
 });
 window.addEventListener("keydown", (event) => {
   if ((event.target as HTMLElement).matches("input, textarea, select")) return;
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
-    event.preventDefault();
-    restore(event.shiftKey ? "redo" : "undo");
-  }
   if ((event.key === "Delete" || event.key === "Backspace") && current()) {
     event.preventDefault();
     element("delete").click();
@@ -356,7 +330,7 @@ function pointerPosition(event: PointerEvent): { x: number; y: number } {
 view.canvas.addEventListener("pointerdown", (event) => {
   if (event.button !== 0 || dragSource) return;
   hands.reset();
-  finishTransaction();
+  finishEdit();
   const { x, y } = pointerPosition(event);
   const id = view.pick(x, y);
   if (id) {
@@ -397,8 +371,8 @@ function updateHandControls(): void {
   element("swap-hands").setAttribute("aria-pressed", String(hands.viewportHand === "Right"));
   element("view-cursor-label").textContent = `${viewportHand} · 視点`;
   element("object-cursor-label").textContent = `${objectHand} · 立体・メニュー`;
-  element("howto-view").textContent = `${viewportHand}で視点を動かす`;
-  element("howto-object").textContent = `${objectHand}で立体・メニューを操作`;
+  element("howto-view").textContent = `${viewportHand}：視点`;
+  element("howto-object").textContent = `${objectHand}：立体・メニュー`;
   const description = viewMode === "zoom"
     ? "つまんだまま上に動かすと拡大、下に動かすと縮小"
     : `つまんだまま動かすと視点が${viewMode === "orbit" ? "回転" : "平行移動"}`;
@@ -406,7 +380,7 @@ function updateHandControls(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-view-mode]").forEach((button) => {
     button.setAttribute("aria-pressed", String(button.dataset.viewMode === viewMode));
   });
-  element("camera-message").textContent = `${viewportHand}で視点、${objectHand}で立体とメニューを操作。ボタンに合わせてつまもう。`;
+  element("camera-message").textContent = "親指と人差し指をつまんで操作します。";
 }
 element("swap-hands").addEventListener("click", () => {
   interruptHands();
@@ -443,7 +417,7 @@ function drawLandmarks(detected: DetectedHand[]): void {
   for (const hand of detected) {
     const points = hand.landmarks;
     if (points.length !== 21) continue;
-    context.strokeStyle = hand.side === hands.viewportHand ? "#f3c580" : "#aaf3d2";
+    context.strokeStyle = hand.side === hands.viewportHand ? "#f3c580" : "#8bb9f5";
     for (const chain of connections) {
       context.beginPath();
       chain.forEach((i, n) => {
@@ -494,7 +468,7 @@ function processHand(detected: DetectedHand[]): void {
     ].filter(Boolean).join(" / ") || "手を探しています";
     element("interaction-hint").textContent = navigating
       ? `${handName(hands.viewportHand)}で視点操作中 · 指を開くと止まります`
-      : `${handName(hands.viewportHand)}：視点 / ${handName(hands.objectHand)}：立体 · つまんで動かそう`;
+      : `${handName(hands.viewportHand)}：視点 / ${handName(hands.objectHand)}：立体・メニュー`;
   }
   // Camera movement has priority over hand object movement. Releasing first
   // keeps the object drag plane from jumping when the camera changes.
@@ -509,7 +483,7 @@ function processHand(detected: DetectedHand[]): void {
     if (handMenu.update(gesture, frame.grab)) {
       view.hover(null);
       if (cameraState === "on")
-        element("interaction-hint").textContent = "ボタンをつまんで決定 · バーはつまんで左右に調整";
+        element("interaction-hint").textContent = "つまむ：決定 / バーを左右に動かす：調整";
       return;
     }
   }
@@ -535,12 +509,12 @@ function cameraOff(message?: string): void {
   interruptHands();
   cameraState = "off";
   cameraButton.disabled = false;
-  cameraButton.textContent = "カメラをはじめる ↗";
-  element("camera-status").textContent = "カメラ OFF";
+  cameraButton.textContent = "カメラを開始";
+  element("camera-status").textContent = "停止中";
   element("camera-placeholder").hidden = false;
   element("camera-message").textContent =
-    message ?? `${handName(hands.viewportHand)}で視点、${handName(hands.objectHand)}で立体・メニューを操作。`;
-  element("interaction-hint").textContent = "立体をドラッグ · 下のメニューで追加・色・編集";
+    message ?? "親指と人差し指をつまんで操作します。";
+  element("interaction-hint").textContent = "ドラッグで移動";
 }
 const handCamera = new HandCamera(video, processHand, (message) => {
   cameraOff(message);
@@ -563,11 +537,11 @@ cameraButton.addEventListener("click", () => {
     .then(() => {
       cameraState = "on";
       cameraButton.disabled = false;
-      cameraButton.textContent = "カメラを止める";
+      cameraButton.textContent = "カメラを停止";
       element("camera-placeholder").hidden = true;
       element("camera-status").textContent = "手を探しています";
       element("camera-message").textContent =
-        `${handName(hands.viewportHand)}で視点、${handName(hands.objectHand)}で立体・メニューを操作。指を開いてからつまんでみよう。`;
+        "親指と人差し指をつまんで操作します。";
       viewport.scrollIntoView({ block: "nearest" });
     })
     .catch((error) => {
@@ -625,7 +599,7 @@ element<HTMLInputElement>("file").addEventListener("change", async (event) => {
       objects = loaded;
       selected = null;
     });
-    toast("作品を開きました。元に戻すと前の作品に戻れます。");
+    toast("作品を開きました。");
   } catch {
     toast(
       "作品を開けませんでした。このアトリエで保存したJSONファイルを選んでください。",

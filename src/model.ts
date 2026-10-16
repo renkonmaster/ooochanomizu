@@ -31,8 +31,6 @@ export const COLORS = [
   "#f5f2e8",
 ];
 export const MAX_OBJECTS = 100;
-export const cloneScene = (objects: SceneObject[]): SceneObject[] =>
-  structuredClone(objects);
 export const clamp = (value: number, min: number, max: number): number =>
   Math.max(min, Math.min(max, value));
 
@@ -53,36 +51,6 @@ export function makeObject(
     rotation: [0, 0, 0],
     scale: 1,
   };
-}
-
-export class History {
-  private past: SceneObject[][] = [];
-  private future: SceneObject[][] = [];
-  get canUndo(): boolean {
-    return this.past.length > 0;
-  }
-  get canRedo(): boolean {
-    return this.future.length > 0;
-  }
-  commit(before: SceneObject[], after: SceneObject[]): boolean {
-    if (JSON.stringify(before) === JSON.stringify(after)) return false;
-    this.past.push(cloneScene(before));
-    if (this.past.length > 50) this.past.shift();
-    this.future = [];
-    return true;
-  }
-  undo(current: SceneObject[]): SceneObject[] | null {
-    const previous = this.past.pop();
-    if (!previous) return null;
-    this.future.push(cloneScene(current));
-    return cloneScene(previous);
-  }
-  redo(current: SceneObject[]): SceneObject[] | null {
-    const next = this.future.pop();
-    if (!next) return null;
-    this.past.push(cloneScene(current));
-    return cloneScene(next);
-  }
 }
 
 export function serializeScene(objects: SceneObject[]): string {

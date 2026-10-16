@@ -20,12 +20,12 @@ export class AtelierScene {
   private dragging: string | null = null;
   private frame = 0;
   private observer: ResizeObserver;
-  private selectionBox = new THREE.BoxHelper(new THREE.Object3D(), 0x2a7465);
+  private selectionBox = new THREE.BoxHelper(new THREE.Object3D(), 0x245fae);
 
   constructor(private host: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-    this.renderer.setClearColor("#f2f4ef");
+    this.renderer.setClearColor("#e7e9ed");
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -38,8 +38,8 @@ export class AtelierScene {
     );
     this.canvas.tabIndex = 0;
     host.prepend(this.canvas);
-    this.scene.fog = new THREE.Fog("#f2f4ef", 22, 50);
-    this.scene.add(new THREE.HemisphereLight("#ffffff", "#aec1b6", 3));
+    this.scene.fog = new THREE.Fog("#e7e9ed", 22, 50);
+    this.scene.add(new THREE.HemisphereLight("#ffffff", "#bec3cb", 3));
     const light = new THREE.DirectionalLight("#fff9ed", 4);
     light.position.set(-4, 9, 5);
     light.castShadow = true;
@@ -52,13 +52,13 @@ export class AtelierScene {
     this.scene.add(light);
     const floor = new THREE.Mesh(
       new THREE.PlaneGeometry(80, 80),
-      new THREE.MeshStandardMaterial({ color: "#eef1ea", roughness: 1 }),
+      new THREE.MeshStandardMaterial({ color: "#e9ebee", roughness: 1 }),
     );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.02;
     floor.receiveShadow = true;
     this.scene.add(floor);
-    const grid = new THREE.GridHelper(30, 30, "#d2dcd1", "#dce3d9");
+    const grid = new THREE.GridHelper(30, 30, "#bec4cd", "#cdd2d9");
     this.scene.add(grid);
     this.selectionBox.visible = false;
     this.scene.add(this.selectionBox);
@@ -188,7 +188,7 @@ export class AtelierScene {
   private highlight(): void {
     for (const [id, mesh] of this.meshes) {
       mesh.material.emissive.set(
-        id === this.hovered || id === this.selected ? "#2a6252" : "#000000",
+        id === this.hovered || id === this.selected ? "#254d7c" : "#000000",
       );
       mesh.material.emissiveIntensity = id === this.selected ? 0.12 : 0.07;
     }

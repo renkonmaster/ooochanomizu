@@ -29,7 +29,7 @@ Move| Grabした状態で手を移動
 Rotate| 未定
 Scale| 未定
 
-Primitive追加・色変更・Delete・Undoなどは必要に応じて画面UIを使用する。
+Primitive追加・色変更・Deleteなどは必要に応じて画面UIを使用する。
 
 ジェスチャーだけで操作することにはこだわらず、初見で操作できることを優先する。
 
