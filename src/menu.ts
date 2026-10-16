@@ -13,6 +13,7 @@ export const atelierMenu = `
   <div class="viewport-toolbar" data-hand-surface>
     <div class="canvas-label"><span>透視投影</span><span id="object-count">立体 3</span></div>
     <div class="view-actions">
+      <button id="viewer-mode" class="menu-action" aria-pressed="false">Viewer</button>
       <button id="reset-view" class="menu-action">視点を戻す</button>
       <button id="fullscreen" class="menu-action" aria-label="全画面にする">⛶</button>
     </div>

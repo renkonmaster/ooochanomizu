@@ -3,6 +3,7 @@ import { AtelierScene, type ViewMode } from "./scene";
 import { HandCamera } from "./hand";
 import { atelierMenu } from "./menu";
 import { HandMenu } from "./hand-menu";
+import { SceneSync } from "./sync";
 import { HandInteraction, type DetectedHand, type Gesture } from "./gesture";
 import {
   COLORS,
@@ -25,6 +26,7 @@ app.innerHTML = `
     <section class="studio" aria-label="創作エリア">
       <div id="viewport" class="viewport">
         ${atelierMenu}
+        <span id="sync-status" class="sync-status" role="status" aria-live="polite" data-state="connecting">接続中…</span>
         <div id="hand-cursor" class="hand-cursor" hidden><span></span><small id="object-cursor-label">右手 · 立体・メニュー</small></div>
         <div id="view-cursor" class="hand-cursor view-cursor" hidden><span></span><small id="view-cursor-label">左手 · 視点</small></div>
         <div id="grab-pill" class="grab-pill" hidden>移動中</div>
@@ -49,7 +51,9 @@ try {
     hands.setViewportHand("Right");
 } catch { /* Hand controls work even if browser storage is unavailable. */ }
 let viewMode: ViewMode = "orbit";
-const storageKey = "tenohira-atelier.scene.v1";
+const requestedRoom = new URLSearchParams(location.search).get("room") ?? "main";
+const room = /^[a-zA-Z0-9_-]{1,64}$/.test(requestedRoom) ? requestedRoom : "main";
+const storageKey = `tenohira-atelier.scene.v1${room === "main" ? "" : `.${room}`}`;
 let objects: SceneObject[] = [
   makeObject("cube", COLORS[0], 2),
   makeObject("sphere", COLORS[1], 1),
@@ -72,6 +76,8 @@ let openMenu: Menu | null = null;
 let dragSource: "mouse" | "hand" | null = null;
 let pendingSave = false;
 let cameraState: "off" | "starting" | "on" = "off";
+let viewerMode = false;
+let sceneSync: SceneSync | null = null;
 let toastTimer = 0;
 let view: AtelierScene;
 
@@ -158,6 +164,7 @@ function select(id: string | null): void {
 function finishEdit(): void {
   if (pendingSave) {
     pendingSave = false;
+    sceneSync?.flush();
     persist();
     updateUI();
   }
@@ -170,9 +177,11 @@ function release(): void {
   finishEdit();
 }
 function edit(action: () => void): void {
+  if (viewerMode) return;
   release();
   action();
   pendingSave = true;
+  sceneSync?.publish(objects);
   sync();
   finishEdit();
 }
@@ -182,7 +191,7 @@ function grab(
   y: number,
   source: "mouse" | "hand",
 ): void {
-  if (dragSource) return;
+  if (viewerMode || dragSource) return;
   select(id);
   if (!view.beginDrag(id, x, y)) return;
   dragSource = source;
@@ -190,11 +199,13 @@ function grab(
   cursor.classList.add("grabbing");
 }
 function move(x: number, y: number): void {
+  if (viewerMode) return;
   const object = current();
   const position = view.drag(x, y);
   if (!object || !position) return;
   object.position = position;
   pendingSave = true;
+  sceneSync?.publish(objects);
   view.sync(objects);
 }
 
@@ -253,6 +264,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-color]").forEach((button) =>
 for (const id of ["scale", "depth", "rotate"]) {
   const input = element<HTMLInputElement>(id);
   input.addEventListener("input", () => {
+    if (viewerMode) return;
     if (dragSource) release();
     const object = current();
     if (!object) return;
@@ -261,6 +273,7 @@ for (const id of ["scale", "depth", "rotate"]) {
     if (id === "scale") object.scale = value;
     else if (id === "depth") object.position[2] = value;
     else object.rotation[1] = (value * Math.PI) / 180;
+    sceneSync?.publish(objects);
     view.sync(objects);
     updateUI();
   });
@@ -308,6 +321,10 @@ element("fullscreen").addEventListener("click", () => {
   ).catch(() => toast("全画面表示を開始できませんでした。"));
 });
 window.addEventListener("keydown", (event) => {
+  if (viewerMode) {
+    if (event.key === "Escape") setViewerMode(false);
+    return;
+  }
   if ((event.target as HTMLElement).matches("input, textarea, select")) return;
   if ((event.key === "Delete" || event.key === "Backspace") && current()) {
     event.preventDefault();
@@ -328,7 +345,7 @@ function pointerPosition(event: PointerEvent): { x: number; y: number } {
   };
 }
 view.canvas.addEventListener("pointerdown", (event) => {
-  if (event.button !== 0 || dragSource) return;
+  if (viewerMode || event.button !== 0 || dragSource) return;
   hands.reset();
   finishEdit();
   const { x, y } = pointerPosition(event);
@@ -339,6 +356,7 @@ view.canvas.addEventListener("pointerdown", (event) => {
   } else select(null);
 });
 view.canvas.addEventListener("pointermove", (event) => {
+  if (viewerMode) return;
   const { x, y } = pointerPosition(event);
   if (dragSource === "mouse") move(x, y);
   else if (!dragSource) view.hover(view.pick(x, y));
@@ -451,6 +469,7 @@ function showHandCursor(node: HTMLElement, gesture: Gesture | null): void {
   }
 }
 function processHand(detected: DetectedHand[]): void {
+  if (viewerMode) return;
   drawLandmarks(detected);
   const frame = hands.update(
     detected,
@@ -518,9 +537,32 @@ function cameraOff(message?: string): void {
 }
 const handCamera = new HandCamera(video, processHand, (message) => {
   cameraOff(message);
-  toast(message);
+  if (!viewerMode) toast(message);
 });
+function setViewerMode(enabled: boolean): void {
+  if (viewerMode === enabled) return;
+  viewerMode = enabled;
+  interruptHands();
+  setMenu(null);
+  sceneSync?.setRole(enabled ? "viewer" : "editor");
+  if (enabled) {
+    handCamera.stop();
+    cameraOff();
+    select(null);
+  }
+  view.setViewer(enabled);
+  document.body.classList.toggle("viewer-mode", enabled);
+  const button = element<HTMLButtonElement>("viewer-mode");
+  button.textContent = enabled ? "Editorに戻る" : "Viewer";
+  button.setAttribute("aria-pressed", String(enabled));
+  const url = new URL(location.href);
+  if (enabled) url.searchParams.set("mode", "viewer");
+  else url.searchParams.delete("mode");
+  window.history.replaceState(null, "", url);
+}
+element("viewer-mode").addEventListener("click", () => setViewerMode(!viewerMode));
 cameraButton.addEventListener("click", () => {
+  if (viewerMode) return;
   if (cameraState === "on") {
     handCamera.stop();
     cameraOff();
@@ -535,6 +577,10 @@ cameraButton.addEventListener("click", () => {
   void handCamera
     .start()
     .then(() => {
+      if (viewerMode) {
+        handCamera.stop();
+        return;
+      }
       cameraState = "on";
       cameraButton.disabled = false;
       cameraButton.textContent = "カメラを停止";
@@ -545,6 +591,7 @@ cameraButton.addEventListener("click", () => {
       viewport.scrollIntoView({ block: "nearest" });
     })
     .catch((error) => {
+      if (viewerMode) return;
       const message =
         error instanceof DOMException &&
         (error.name === "NotAllowedError" || error.name === "SecurityError")
@@ -569,6 +616,7 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("pagehide", () => {
   release();
+  sceneSync?.close();
   handCamera.stop();
   view.dispose();
 });
@@ -609,6 +657,37 @@ element<HTMLInputElement>("file").addEventListener("change", async (event) => {
   }
 });
 sync();
+if (new URLSearchParams(location.search).get("mode") === "viewer") setViewerMode(true);
+const syncUrl = new URL("/sync", location.href);
+syncUrl.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+sceneSync = new SceneSync({
+  url: syncUrl.href,
+  room,
+  role: viewerMode ? "viewer" : "editor",
+  initial: objects,
+  onScene(incoming, initialized) {
+    // Applying a server state must never send it back as a new edit.
+    if (selected && !incoming.some((object) => object.id === selected)) {
+      pendingSave = false;
+      release();
+      selected = null;
+    }
+    objects = incoming;
+    sync();
+    if (initialized) persist();
+  },
+  onStatus(status) {
+    const node = element("sync-status");
+    node.dataset.state = status;
+    node.textContent = {
+      connecting: "接続中…",
+      connected: "",
+      waiting: "Editor接続待ち",
+      reconnecting: "再接続中…",
+    }[status];
+  },
+  onError: toast,
+});
 if (storageFailed)
   toast(
     "前の作品を読み込めませんでした。「作品を保存」でファイルに保存できます。",

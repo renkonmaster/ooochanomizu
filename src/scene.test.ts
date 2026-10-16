@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { PerspectiveCamera } from "three";
+import { Fog, PerspectiveCamera, Scene } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { AtelierScene } from "./scene";
+import type { SceneObject } from "./model";
 
 // Exercise the real camera and OrbitControls math without creating WebGL.
 function navigation() {
@@ -23,6 +24,81 @@ function navigation() {
 }
 
 describe("hand viewport navigation", () => {
+  it("keeps the Viewer camera fixed when objects change or the viewport resizes", () => {
+    const { view, camera, controls } = navigation();
+    Object.assign(view, {
+      scene: new Scene(), meshes: new Map(), selectionBox: { visible: false },
+      host: { getBoundingClientRect: () => ({ width: 390, height: 844 }) },
+      renderer: { setSize() {} },
+    });
+    view.setViewer(true);
+    const position = camera.position.clone();
+    const rotation = camera.quaternion.clone();
+    const target = controls.target.clone();
+    const object: SceneObject = {
+      id: "object", kind: "cube", color: "#83cbb2",
+      position: [0, 1, 0], rotation: [0, 0, 0], scale: 1,
+    };
+    for (const objects of [
+      [object],
+      [{ ...object, position: [10, 10, -10] as [number, number, number], scale: 3 }],
+      [object, { ...object, id: "added" }],
+      [],
+    ]) {
+      view.sync(objects);
+      expect(camera.position.equals(position)).toBe(true);
+      expect(camera.quaternion.equals(rotation)).toBe(true);
+      expect(controls.target.equals(target)).toBe(true);
+    }
+    Reflect.get(view, "resize").call(view);
+    expect(camera.aspect).toBeCloseTo(390 / 844);
+    expect(camera.position.equals(position)).toBe(true);
+    expect(controls.target.toArray()).toEqual([0, 1.3, 0]);
+    expect(controls.getDistance()).toBeCloseTo(24);
+  });
+
+  it("continues orbiting at a constant distance and height around the fixed center", () => {
+    const { view, camera, controls } = navigation();
+    Object.assign(view, { scene: new Scene(), meshes: new Map(), selectionBox: { visible: false } });
+    view.setViewer(true);
+    const before = camera.position.clone();
+    const height = camera.position.y;
+    for (let step = 0; step < 24; step++) {
+      Reflect.get(view, "updateViewer").call(view, 5);
+      expect(controls.target.toArray()).toEqual([0, 1.3, 0]);
+      expect(controls.getDistance()).toBeCloseTo(24);
+      expect(camera.position.y).toBeCloseTo(height);
+      if (step === 0) expect(camera.position.equals(before)).toBe(false);
+    }
+    expect(camera.position.distanceTo(before)).toBeLessThan(1e-10);
+  });
+
+  it("disables editing in Viewer and restores the Editor camera on return", () => {
+    const { view, camera, controls } = navigation();
+    const scene = new Scene();
+    const fog = new Fog("#ffffff", 22, 50);
+    scene.fog = fog;
+    Object.assign(view, { scene, meshes: new Map(), selectionBox: { visible: false } });
+    const position = camera.position.clone();
+    const target = controls.target.clone();
+    const far = camera.far;
+    view.setViewer(true);
+    expect(controls.enabled).toBe(false);
+    expect(scene.fog).toBeNull();
+    expect(view.pick(0.5, 0.5)).toBeNull();
+    expect(view.beginDrag("object", 0.5, 0.5)).toBe(false);
+    const viewerPosition = camera.position.clone();
+    view.navigate("orbit", 0.1, 0.1);
+    view.endDrag();
+    expect(camera.position.equals(viewerPosition)).toBe(true);
+    expect(controls.enabled).toBe(false);
+    view.setViewer(false);
+    expect(camera.position.distanceTo(position)).toBeLessThan(1e-10);
+    expect(controls.target.equals(target)).toBe(true);
+    expect(camera.far).toBe(far);
+    expect(scene.fog).toBe(fog);
+    expect(controls.enabled).toBe(true);
+  });
   it("orbits around the target without changing distance, and stops without drift", () => {
     const { view, camera, controls } = navigation();
     const before = camera.position.clone();

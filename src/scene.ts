@@ -2,6 +2,9 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { clamp, type SceneObject } from "./model";
 
+const VIEWER_CENTER = new THREE.Vector3(0, 1.3, 0);
+const VIEWER_DISTANCE = 24;
+
 type Solid = THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
 export type ViewMode = "orbit" | "pan" | "zoom";
 
@@ -19,6 +22,13 @@ export class AtelierScene {
   private hovered: string | null = null;
   private dragging: string | null = null;
   private frame = 0;
+  private lastFrameTime = 0;
+  private viewer: {
+    angle: number;
+    editorPosition: THREE.Vector3;
+    editorTarget: THREE.Vector3;
+    editorFog: THREE.Scene["fog"];
+  } | null = null;
   private observer: ResizeObserver;
   private selectionBox = new THREE.BoxHelper(new THREE.Object3D(), 0x245fae);
 
@@ -89,6 +99,10 @@ export class AtelierScene {
   }
 
   resetView(): void {
+    if (this.viewer) {
+      this.updateViewer(0);
+      return;
+    }
     // Flush damping so a previous mouse/hand movement cannot move the reset view.
     const damping = this.controls.enableDamping;
     this.controls.enableDamping = false;
@@ -100,7 +114,7 @@ export class AtelierScene {
   }
 
   navigate(mode: ViewMode, dx: number, dy: number): void {
-    if (this.dragging || !Number.isFinite(dx) || !Number.isFinite(dy)) return;
+    if (this.viewer || this.dragging || !Number.isFinite(dx) || !Number.isFinite(dy)) return;
     // Apply each inference delta exactly once; mouse navigation retains damping.
     const damping = this.controls.enableDamping;
     this.controls.enableDamping = false;
@@ -115,9 +129,52 @@ export class AtelierScene {
     this.controls.enableDamping = damping;
   }
 
-  private render = (): void => {
+  setViewer(enabled: boolean): void {
+    if (enabled === !!this.viewer) return;
+    if (enabled) {
+      this.endDrag();
+      const damping = this.controls.enableDamping;
+      this.controls.enableDamping = false;
+      this.controls.update();
+      this.controls.enableDamping = damping;
+      this.select(null);
+      this.hover(null);
+      this.viewer = {
+        angle: Math.atan2(this.camera.position.x - this.controls.target.x, this.camera.position.z - this.controls.target.z),
+        editorPosition: this.camera.position.clone(),
+        editorTarget: this.controls.target.clone(),
+        editorFog: this.scene.fog,
+      };
+      this.controls.enabled = false;
+      this.scene.fog = null;
+      this.updateViewer(0);
+    } else if (this.viewer) {
+      const saved = this.viewer;
+      this.viewer = null;
+      this.camera.position.copy(saved.editorPosition);
+      this.controls.target.copy(saved.editorTarget);
+      this.scene.fog = saved.editorFog;
+      this.controls.enabled = true;
+      this.controls.update();
+    }
+    this.lastFrameTime = 0;
+  }
+
+  private updateViewer(seconds: number): void {
+    if (!this.viewer) return;
+    this.viewer.angle = (this.viewer.angle + seconds * Math.PI * 2 / 120) % (Math.PI * 2);
+    const offset = new THREE.Vector3().setFromSphericalCoords(VIEWER_DISTANCE, Math.PI / 3, this.viewer.angle);
+    this.controls.target.copy(VIEWER_CENTER);
+    this.camera.position.copy(VIEWER_CENTER).add(offset);
+    this.camera.lookAt(VIEWER_CENTER);
+  }
+
+  private render = (time = performance.now()): void => {
     this.frame = requestAnimationFrame(this.render);
-    this.controls.update();
+    const seconds = this.lastFrameTime ? Math.min((time - this.lastFrameTime) / 1000, 0.1) : 0;
+    this.lastFrameTime = time;
+    if (this.viewer) this.updateViewer(seconds);
+    else this.controls.update();
     if (this.selected && this.meshes.has(this.selected))
       this.selectionBox.setFromObject(this.meshes.get(this.selected)!);
     this.renderer.render(this.scene, this.camera);
@@ -205,6 +262,7 @@ export class AtelierScene {
   }
 
   pick(x: number, y: number): string | null {
+    if (this.viewer) return null;
     this.aim(x, y);
     const hit = this.raycaster.intersectObjects(
       [...this.meshes.values()],
@@ -214,6 +272,7 @@ export class AtelierScene {
   }
 
   beginDrag(id: string, x: number, y: number): boolean {
+    if (this.viewer) return false;
     const mesh = this.meshes.get(id);
     if (!mesh) return false;
     this.aim(x, y);
@@ -250,7 +309,7 @@ export class AtelierScene {
 
   endDrag(): void {
     this.dragging = null;
-    this.controls.enabled = true;
+    this.controls.enabled = !this.viewer;
   }
   dispose(): void {
     cancelAnimationFrame(this.frame);

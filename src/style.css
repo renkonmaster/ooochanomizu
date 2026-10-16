@@ -510,6 +510,56 @@ input:disabled {
     display: none;
   }
 }
+.sync-status {
+  position: absolute;
+  top: 80px;
+  left: 12px;
+  z-index: 6;
+  padding: 7px 11px;
+  border-radius: 8px;
+  background: #fffdf7e8;
+  color: #66645e;
+  font-size: 12px;
+  pointer-events: none;
+}
+.sync-status[data-state="connected"] {
+  display: none;
+}
+
+.viewer-mode .topbar,
+.viewer-mode .camera-strip,
+.viewer-mode .input-guide,
+.viewer-mode .viewport-panel,
+.viewer-mode .viewport-dock,
+.viewer-mode .canvas-bottom,
+.viewer-mode .canvas-label,
+.viewer-mode .hand-cursor,
+.viewer-mode .grab-pill,
+.viewer-mode #reset-view {
+  display: none !important;
+}
+.viewer-mode .workspace {
+  min-height: 100dvh;
+}
+.viewer-mode .studio {
+  padding: 0;
+}
+.viewer-mode .viewport {
+  height: 100dvh;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+.viewer-mode .viewport-toolbar {
+  justify-content: flex-end;
+  background: transparent;
+  border: 0;
+}
+@media (max-width: 400px) {
+  .canvas-label > span:first-child {
+    display: none;
+  }
+}
 @media (max-width: 700px) {
   .topbar {
     padding: 0 12px;
