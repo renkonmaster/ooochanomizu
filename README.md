@@ -94,6 +94,24 @@ npm start
 実機では左手だけで視点操作、右手だけで立体移動、両手操作の優先順位、左右の入れ替えと
 リロード後の設定復元、手が隠れた場合の停止を確認してください。
 
+## Docker / NeoShowcase
+
+```sh
+docker build -t tenohira-atelier .
+docker run --rm --init -p 127.0.0.1:3000:3000 tenohira-atelier
+```
+
+Editorは `http://localhost:3000/`、Viewerは `http://localhost:3000/?mode=viewer` で開きます。
+Dockerfileは `mise.toml` と同じNode.js 24.19.0を使用します。
+依存関係の取得とモデルのダウンロードはビルド時に行うため、その際はインターネット接続が必要です。
+起動時にはモデルの取得やフロントエンドのビルドを行いません。
+実行イメージには本番依存関係・`dist/`・サーバー・共有のシーン検証コードを含め、`node` ユーザーで実行します。
+
+NeoShowcaseではRuntimeアプリとしてルートの `Dockerfile` を指定し、公開先ポートを `3000` に設定してください。
+コンテナは標準で `HOST=0.0.0.0`、`PORT=3000` で起動し、HTTPとWebSocketを同じポートで受け付けます。
+公開後はHTTPSでEditorのカメラ入力とViewerへの同期を確認してください。
+作品は現状メモリ上にあり、コンテナ内の永続保存は行いません。
+
 ## 構成
 
 - `src/main.ts`: 操作の接続、メニュー状態、自動保存、ファイル入出力
