@@ -118,7 +118,7 @@ function persist(): void {
 }
 function updateUI(): void {
   const object = current();
-  element("object-count").textContent = `立体 ${objects.length}`;
+
   element<HTMLFieldSetElement>("transform").disabled = !object;
   element("selection-name").textContent = object
     ? `${LABELS[object.kind]}を選択中`
