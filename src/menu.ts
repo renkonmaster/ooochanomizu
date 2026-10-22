@@ -7,17 +7,25 @@ const shapes: Record<Primitive, string> = {
   cone: '<path d="M5 25 16 3l11 22 M5 25c0-6 22-6 22 0s-22 6-22 0Z"/>',
   torus: '<ellipse cx="16" cy="16" rx="13" ry="10"/><ellipse cx="16" cy="14" rx="6" ry="4"/>',
 };
+const colorLabels = ["ミント", "コーラル", "きいろ", "ブルー", "ラベンダー", "ホワイト"];
 const heading = (title: string) => `<div class="menu-heading"><h2>${title}</h2><button class="menu-close" data-menu-close aria-label="メニューを閉じる">×</button></div>`;
 
 export const atelierMenu = `
-  <div class="viewport-toolbar" data-hand-surface>
-    <div class="canvas-label"><span>透視投影</span><span id="object-count">立体 3</span></div>
-    <div class="view-actions">
+
+  <aside class="viewport-controls" data-hand-surface aria-label="創作ツール">
+    <div class="viewport-toolbar">
+      <div class="view-actions">
       <button id="viewer-mode" class="menu-action" aria-pressed="false">Viewer</button>
       <button id="reset-view" class="menu-action">視点を戻す</button>
       <button id="fullscreen" class="menu-action" aria-label="全画面にする">⛶</button>
+      </div>
     </div>
-  </div>
+    <nav class="viewport-dock" aria-label="創作メニュー">
+      <button data-menu="add" aria-controls="menu-add" aria-expanded="false"><span aria-hidden="true">＋</span>追加</button>
+      <button data-menu="color" aria-controls="menu-color" aria-expanded="false"><span class="color-icon" aria-hidden="true"></span>色</button>
+      <button data-menu="edit" aria-controls="menu-edit" aria-expanded="false">編集</button>
+      <button data-menu="view" aria-controls="menu-view" aria-expanded="false" aria-label="視点・左右">視点</button>
+    </nav>
   <section id="menu-add" class="viewport-panel" data-hand-surface aria-label="形を追加" hidden>
     ${heading("立体を追加")}
     <p class="menu-help">種類を選択して追加します。</p>
@@ -29,7 +37,7 @@ export const atelierMenu = `
   <section id="menu-color" class="viewport-panel" data-hand-surface aria-label="色" hidden>
     ${heading("色")}
     <p id="color-target" class="menu-help">次に追加する立体の色</p>
-    <div class="palette" role="group" aria-label="色">${COLORS.map((color, i) => `<button class="swatch" data-color="${color}" style="--swatch:${color}" aria-label="${["ミント", "コーラル", "きいろ", "ブルー", "ラベンダー", "ホワイト"][i]}" aria-pressed="${i === 0}"><span>${["ミント", "コーラル", "きいろ", "ブルー", "ラベンダー", "ホワイト"][i]}</span></button>`).join("")}</div>
+    <div class="palette" role="group" aria-label="色">${COLORS.map((color, i) => `<button class="swatch" data-color="${color}" style="--swatch:${color}" aria-label="${colorLabels[i]}" aria-pressed="${i === 0}"><span>${colorLabels[i]}</span></button>`).join("")}</div>
     <button id="clear-selection" class="menu-action">選択を解除</button>
   </section>
   <section id="menu-edit" class="viewport-panel" data-hand-surface aria-label="立体を編集" hidden>
@@ -49,9 +57,4 @@ export const atelierMenu = `
     <p id="hand-roles" aria-live="polite">左手：視点 / 右手：立体・メニュー</p>
     <button id="swap-hands" class="menu-action" aria-label="視点操作を右手にする" aria-pressed="false">左右を入れ替える</button>
   </section>
-  <nav class="viewport-dock" data-hand-surface aria-label="創作メニュー">
-    <button data-menu="add" aria-controls="menu-add" aria-expanded="false">追加</button>
-    <button data-menu="color" aria-controls="menu-color" aria-expanded="false">色</button>
-    <button data-menu="edit" aria-controls="menu-edit" aria-expanded="false">編集</button>
-    <button data-menu="view" aria-controls="menu-view" aria-expanded="false">視点・左右</button>
-  </nav>`;
+  </aside>`;
